@@ -28,12 +28,23 @@ def verify_api_key(api_key):
         return False, "请输入API密钥"
     
     try:
-        # 创建临时客户端测试连接
         client = APIClient(api_key)
         success, message = client.test_connection()
         return success, message
     except Exception as e:
         return False, f"验证失败: {str(e)}"
+
+def clear_data():
+    """清除所有数据"""
+    st.session_state.uploaded_file = None
+    st.session_state.df = None
+    st.session_state.file_name = None
+    st.session_state.processing_done = False
+    # 使用一个key来重置file_uploader组件
+    if 'uploader_key' in st.session_state:
+        st.session_state.uploader_key += 1
+    else:
+        st.session_state.uploader_key = 1
 
 def main():
     st.title("🏥 ICD-10 诊断编码映射系统")
@@ -50,6 +61,10 @@ def main():
         st.session_state.api_verified = False
     if 'processing_done' not in st.session_state:
         st.session_state.processing_done = False
+    if 'uploader_key' not in st.session_state:
+        st.session_state.uploader_key = 0
+    if 'data_source' not in st.session_state:
+        st.session_state.data_source = None  # 'upload' 或 'sample'
     
     # ========== 第一部分：API密钥配置 ==========
     st.subheader("🔑 API密钥配置")
@@ -93,11 +108,13 @@ def main():
     col_file1, col_file2, col_file3 = st.columns([1, 1, 1])
     
     with col_file1:
+        # 使用key来让file_uploader可以被重置
         uploaded_file = st.file_uploader(
             "上传CSV文件", 
             type=['csv'],
             help="包含诊断描述的CSV文件",
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key=f"file_uploader_{st.session_state.uploader_key}"  # 动态key实现重置
         )
     
     with col_file2:
@@ -105,6 +122,10 @@ def main():
             sample_path = Path("data/sample/示例诊断数据.csv")
             if sample_path.exists():
                 try:
+                    # 先清除之前的数据
+                    clear_data()
+                    
+                    # 读取示例文件
                     with open(sample_path, 'rb') as f:
                         sample_bytes = f.read()
                     
@@ -113,6 +134,7 @@ def main():
                     st.session_state.uploaded_file.name = "示例诊断数据.csv"
                     st.session_state.df = pd.read_csv(sample_path)
                     st.session_state.file_name = "示例诊断数据"
+                    st.session_state.data_source = 'sample'
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ 示例数据加载失败: {str(e)}")
@@ -121,30 +143,31 @@ def main():
     
     with col_file3:
         if st.button("🗑️ 清除数据", use_container_width=True):
-            st.session_state.uploaded_file = None
-            st.session_state.df = None
-            st.session_state.file_name = None
-            st.session_state.processing_done = False
+            clear_data()
             st.rerun()
     
     # 处理上传的文件或示例数据
     current_df = None
     current_file_name = None
     
+    # 优先处理用户上传的文件
     if uploaded_file is not None:
         try:
             current_df = pd.read_csv(uploaded_file)
             current_file_name = Path(uploaded_file.name).stem
+            # 保存到session state
+            st.session_state.df = current_df
+            st.session_state.file_name = current_file_name
+            st.session_state.data_source = 'upload'
             st.success(f"✅ 成功加载 {len(current_df)} 条记录")
         except Exception as e:
             st.error(f"❌ 文件加载失败: {str(e)}")
-    elif st.session_state.uploaded_file is not None:
-        try:
-            current_df = st.session_state.df
-            current_file_name = st.session_state.file_name
-            st.success(f"✅ 成功加载示例数据 ({len(current_df)} 条记录)")
-        except Exception as e:
-            st.error(f"❌ 示例数据读取失败: {str(e)}")
+            current_df = None
+    elif st.session_state.data_source == 'sample' and st.session_state.df is not None:
+        # 使用之前加载的示例数据
+        current_df = st.session_state.df
+        current_file_name = st.session_state.file_name
+        st.success(f"✅ 成功加载示例数据 ({len(current_df)} 条记录)")
     
     # ========== 第三部分：列选择和参数配置 ==========
     if current_df is not None:
@@ -197,41 +220,35 @@ def main():
                         st.error(f"❌ API密钥验证失败: {message}")
                         st.stop()
             
-            if st.session_state.api_verified or st.session_state.api_verified:
+            if st.session_state.api_verified:
                 process_data(current_df, current_file_name, diag_col, api_key, 
                            confidence_threshold, top_k)
     
     # ========== 第五部分：结果展示和下载 ==========
-    if st.session_state.processing_done:
+    if st.session_state.processing_done and st.session_state.file_name:
         st.markdown("---")
         st.subheader("📊 处理结果")
         
-        col_result1, col_result2 = st.columns(2)
-        
-        with col_result1:
-            st.success(f"✅ 处理完成！文件: {st.session_state.file_name}")
-        
-        with col_result2:
-            output_dir = Path(f"results/{st.session_state.file_name}")
-            if output_dir.exists():
-                # 创建ZIP压缩包
-                zip_path = f"{output_dir}.zip"
-                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    for root, dirs, files in os.walk(output_dir):
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            arcname = os.path.relpath(file_path, os.path.dirname(output_dir))
-                            zipf.write(file_path, arcname)
-                
-                # 下载按钮
-                with open(zip_path, 'rb') as f:
-                    st.download_button(
-                        label=f"📦 下载完整结果包 ({output_dir.name}.zip)",
-                        data=f,
-                        file_name=f"{output_dir.name}.zip",
-                        mime="application/zip",
-                        use_container_width=True
-                    )
+        output_dir = Path(f"results/{st.session_state.file_name}")
+        if output_dir.exists():
+            # 创建ZIP压缩包
+            zip_path = f"{output_dir}.zip"
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(output_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, os.path.dirname(output_dir))
+                        zipf.write(file_path, arcname)
+            
+            # 下载按钮
+            with open(zip_path, 'rb') as f:
+                st.download_button(
+                    label=f"📦 下载完整结果包 ({output_dir.name}.zip)",
+                    data=f,
+                    file_name=f"{output_dir.name}.zip",
+                    mime="application/zip",
+                    use_container_width=True
+                )
 
 def process_data(df, file_name, diag_col, api_key, confidence_threshold, top_k):
     """处理数据的主函数"""
