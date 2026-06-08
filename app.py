@@ -17,9 +17,23 @@ st.set_page_config(
 # 导入自定义模块
 from icd_processor import ICDProcessor
 from utils.logger import setup_logger
+from utils.api_client import APIClient
 
 # 初始化日志
 logger = setup_logger()
+
+def verify_api_key(api_key):
+    """验证API密钥是否有效"""
+    if not api_key or api_key.strip() == "":
+        return False, "请输入API密钥"
+    
+    try:
+        # 创建临时客户端测试连接
+        client = APIClient(api_key)
+        success, message = client.test_connection()
+        return success, message
+    except Exception as e:
+        return False, f"验证失败: {str(e)}"
 
 def main():
     st.title("🏥 ICD-10 诊断编码映射系统")
@@ -44,6 +58,29 @@ def main():
             st.session_state.df = None
         if 'file_name' not in st.session_state:
             st.session_state.file_name = None
+        if 'api_verified' not in st.session_state:
+            st.session_state.api_verified = False
+        
+        # 密钥验证按钮
+        if api_key:
+            col_verify1, col_verify2 = st.columns([3, 1])
+            with col_verify1:
+                if st.button("🔍 验证密钥", use_container_width=True):
+                    with st.spinner("正在验证API密钥..."):
+                        success, message = verify_api_key(api_key)
+                        if success:
+                            st.session_state.api_verified = True
+                            st.success(f"✅ {message}")
+                        else:
+                            st.session_state.api_verified = False
+                            st.error(f"❌ {message}")
+            with col_verify2:
+                if st.session_state.api_verified:
+                    st.markdown("✅")
+                else:
+                    st.markdown("❌")
+        
+        st.markdown("---")
         
         # 文件上传区域
         uploaded_file = st.file_uploader(
@@ -131,9 +168,24 @@ def main():
             
             # 开始处理按钮
             if st.button("🚀 开始处理", type="primary", use_container_width=True):
+                # 验证API密钥
                 if not api_key:
                     st.error("❌ 请先输入API密钥")
+                elif not st.session_state.api_verified:
+                    # 之前没验证过，现在自动验证
+                    with st.spinner("正在验证API密钥..."):
+                        success, message = verify_api_key(api_key)
+                        if success:
+                            st.session_state.api_verified = True
+                            st.success(f"✅ {message}")
+                            # 验证成功后开始处理
+                            process_data(current_df, current_file_name, diag_col, api_key, 
+                                       confidence_threshold, top_k)
+                        else:
+                            st.error(f"❌ API密钥验证失败: {message}")
+                            st.stop()
                 else:
+                    # 已验证过，直接处理
                     process_data(current_df, current_file_name, diag_col, api_key, 
                                confidence_threshold, top_k)
         
