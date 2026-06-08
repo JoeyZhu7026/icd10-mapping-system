@@ -107,13 +107,6 @@ def main():
     # ========== 第一部分：API密钥配置 ==========
     st.subheader("🔑 API密钥配置")
     
-    # 显示验证结果消息（全宽度）
-    if st.session_state.verify_message is not None:
-        if st.session_state.verify_success:
-            st.success(st.session_state.verify_message)
-        else:
-            st.error(st.session_state.verify_message)
-    
     col_key1, col_key2, col_key3 = st.columns([3, 1, 1])
     
     with col_key1:
@@ -143,6 +136,13 @@ def main():
             st.markdown('<div class="status-box status-verified">✅ 已验证</div>', unsafe_allow_html=True)
         else:
             st.markdown('<div class="status-box status-unverified">⭕ 未验证</div>', unsafe_allow_html=True)
+    
+    # 验证结果消息显示在下方（全宽度）
+    if st.session_state.verify_message is not None:
+        if st.session_state.verify_success:
+            st.success(st.session_state.verify_message)
+        else:
+            st.error(st.session_state.verify_message)
     
     st.markdown("---")
     
