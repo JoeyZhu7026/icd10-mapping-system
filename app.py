@@ -22,6 +22,40 @@ from utils.api_client import APIClient
 # 初始化日志
 logger = setup_logger()
 
+# 自定义CSS样式
+st.markdown("""
+<style>
+    /* 让按钮和输入框高度一致 */
+    .stButton > button {
+        height: 42px !important;
+        margin-top: 0px !important;
+        padding-top: 0px !important;
+        padding-bottom: 0px !important;
+    }
+    
+    /* 验证状态框样式 */
+    .status-box {
+        padding: 8px 16px;
+        border-radius: 4px;
+        text-align: center;
+        font-size: 14px;
+        height: 42px;
+        line-height: 26px;
+        margin-top: 0px;
+    }
+    .status-verified {
+        background-color: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+    }
+    .status-unverified {
+        background-color: #e2e3e5;
+        color: #383d41;
+        border: 1px solid #d6d8db;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 def verify_api_key(api_key):
     """验证API密钥是否有效"""
     if not api_key or api_key.strip() == "":
@@ -40,7 +74,7 @@ def clear_data():
     st.session_state.df = None
     st.session_state.file_name = None
     st.session_state.processing_done = False
-    # 使用一个key来重置file_uploader组件
+    st.session_state.data_source = None
     if 'uploader_key' in st.session_state:
         st.session_state.uploader_key += 1
     else:
@@ -64,7 +98,7 @@ def main():
     if 'uploader_key' not in st.session_state:
         st.session_state.uploader_key = 0
     if 'data_source' not in st.session_state:
-        st.session_state.data_source = None  # 'upload' 或 'sample'
+        st.session_state.data_source = None
     
     # ========== 第一部分：API密钥配置 ==========
     st.subheader("🔑 API密钥配置")
@@ -96,36 +130,34 @@ def main():
     
     with col_key3:
         if st.session_state.api_verified:
-            st.success("✅ 已验证")
+            st.markdown('<div class="status-box status-verified">✅ 已验证</div>', unsafe_allow_html=True)
         else:
-            st.info("⭕ 未验证")
+            st.markdown('<div class="status-box status-unverified">⭕ 未验证</div>', unsafe_allow_html=True)
     
     st.markdown("---")
     
     # ========== 第二部分：数据上传 ==========
     st.subheader("📁 数据上传")
     
-    col_file1, col_file2, col_file3 = st.columns([1, 1, 1])
+    # 左2/3：上传框，右1/3：两个按钮上下排列
+    col_left, col_right = st.columns([2, 1])
     
-    with col_file1:
-        # 使用key来让file_uploader可以被重置
+    with col_left:
         uploaded_file = st.file_uploader(
             "上传CSV文件", 
             type=['csv'],
             help="包含诊断描述的CSV文件",
             label_visibility="collapsed",
-            key=f"file_uploader_{st.session_state.uploader_key}"  # 动态key实现重置
+            key=f"file_uploader_{st.session_state.uploader_key}"
         )
     
-    with col_file2:
+    with col_right:
         if st.button("📋 加载示例数据", use_container_width=True):
             sample_path = Path("data/sample/示例诊断数据.csv")
             if sample_path.exists():
                 try:
-                    # 先清除之前的数据
                     clear_data()
                     
-                    # 读取示例文件
                     with open(sample_path, 'rb') as f:
                         sample_bytes = f.read()
                     
@@ -140,8 +172,7 @@ def main():
                     st.error(f"❌ 示例数据加载失败: {str(e)}")
             else:
                 st.warning("⚠️ 示例数据文件不存在")
-    
-    with col_file3:
+        
         if st.button("🗑️ 清除数据", use_container_width=True):
             clear_data()
             st.rerun()
@@ -150,12 +181,10 @@ def main():
     current_df = None
     current_file_name = None
     
-    # 优先处理用户上传的文件
     if uploaded_file is not None:
         try:
             current_df = pd.read_csv(uploaded_file)
             current_file_name = Path(uploaded_file.name).stem
-            # 保存到session state
             st.session_state.df = current_df
             st.session_state.file_name = current_file_name
             st.session_state.data_source = 'upload'
@@ -164,7 +193,6 @@ def main():
             st.error(f"❌ 文件加载失败: {str(e)}")
             current_df = None
     elif st.session_state.data_source == 'sample' and st.session_state.df is not None:
-        # 使用之前加载的示例数据
         current_df = st.session_state.df
         current_file_name = st.session_state.file_name
         st.success(f"✅ 成功加载示例数据 ({len(current_df)} 条记录)")
@@ -200,7 +228,6 @@ def main():
                 help="向量检索时返回的候选数量"
             )
         
-        # 数据预览
         with st.expander("📊 数据预览（点击展开）"):
             st.dataframe(current_df.head(10), use_container_width=True)
         
@@ -231,7 +258,6 @@ def main():
         
         output_dir = Path(f"results/{st.session_state.file_name}")
         if output_dir.exists():
-            # 创建ZIP压缩包
             zip_path = f"{output_dir}.zip"
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 for root, dirs, files in os.walk(output_dir):
@@ -240,7 +266,6 @@ def main():
                         arcname = os.path.relpath(file_path, os.path.dirname(output_dir))
                         zipf.write(file_path, arcname)
             
-            # 下载按钮
             with open(zip_path, 'rb') as f:
                 st.download_button(
                     label=f"📦 下载完整结果包 ({output_dir.name}.zip)",
@@ -253,7 +278,6 @@ def main():
 def process_data(df, file_name, diag_col, api_key, confidence_threshold, top_k):
     """处理数据的主函数"""
     
-    # 创建进度显示区域
     st.markdown("---")
     st.subheader("🔄 处理进度")
     
@@ -263,13 +287,11 @@ def process_data(df, file_name, diag_col, api_key, confidence_threshold, top_k):
     stats_container = st.empty()
     
     try:
-        # 1. 创建输出目录
         output_dir = Path(f"results/{file_name}")
         output_dir.mkdir(parents=True, exist_ok=True)
         log_dir = output_dir / "log"
         log_dir.mkdir(exist_ok=True)
         
-        # 2. 初始化处理器
         status_text.text("📚 正在初始化系统...")
         progress_bar.progress(5)
         
@@ -279,7 +301,6 @@ def process_data(df, file_name, diag_col, api_key, confidence_threshold, top_k):
             top_k=top_k
         )
         
-        # 3. 加载知识库
         status_text.text("📚 加载ICD知识库并构建向量索引...")
         progress_bar.progress(10)
         
@@ -290,7 +311,6 @@ def process_data(df, file_name, diag_col, api_key, confidence_threshold, top_k):
         
         progress_bar.progress(30)
         
-        # 4. 处理数据
         status_text.text("🔄 正在处理诊断描述...")
         
         results = []
@@ -300,25 +320,21 @@ def process_data(df, file_name, diag_col, api_key, confidence_threshold, top_k):
         for idx, row in df.iterrows():
             diagnosis = row[diag_col]
             
-            # 处理单条记录
             result = processor.process_single(diagnosis, idx)
             results.append(result)
             
             if result['处理状态'] == '成功':
                 success_count += 1
             
-            # 更新进度
             progress = 30 + int((idx + 1) / total * 60)
             progress_bar.progress(progress)
             
-            # 更新状态显示
             step_text.markdown(f"""
             **处理进度**: {idx+1}/{total}  
             **当前模型**: {result.get('Step1', {}).get('使用的模型', 'N/A')}  
             **当前诊断**: {str(diagnosis)[:50]}...
             """)
             
-            # 每5条更新统计
             if (idx + 1) % 5 == 0 or (idx + 1) == total:
                 stats_container.info(f"""
                 📊 实时统计:  
@@ -328,16 +344,13 @@ def process_data(df, file_name, diag_col, api_key, confidence_threshold, top_k):
         progress_bar.progress(95)
         status_text.text("✅ 处理完成！正在生成结果文件...")
         
-        # 5. 保存结果
         save_results(df, results, diag_col, output_dir, file_name)
         
         progress_bar.progress(100)
         status_text.text("✅ 处理完成！")
         
-        # 6. 显示统计
         st.success(f"✅ 处理完成！成功编码 {success_count}/{total} 条记录")
         
-        # 统计信息
         col_stat1, col_stat2, col_stat3, col_stat4, col_stat5 = st.columns(5)
         
         with col_stat1:
@@ -353,13 +366,11 @@ def process_data(df, file_name, diag_col, api_key, confidence_threshold, top_k):
             retrieval_count = sum(1 for r in results if r['匹配方式'] == '检索匹配')
             st.metric("检索匹配", retrieval_count)
         
-        # 结果预览
         with st.expander("📊 结果预览（点击展开）"):
             result_cols = [col for col in df.columns if col.endswith(('.icd10', '.score', '.status', '.method'))]
             preview_cols = [df.columns[0]] + result_cols
             st.dataframe(df[preview_cols].head(20), use_container_width=True)
         
-        # 标记处理完成
         st.session_state.processing_done = True
         st.session_state.file_name = file_name
         
@@ -372,13 +383,11 @@ def process_data(df, file_name, diag_col, api_key, confidence_threshold, top_k):
 def save_results(df, results, diag_col, output_dir, file_name):
     """保存处理结果"""
     
-    # 提取结果列
     icd_codes = [r['最终ICD编码'] for r in results]
     scores = [r['最终置信度'] for r in results]
     statuses = [r['处理状态'] for r in results]
     methods = [r['匹配方式'] for r in results]
     
-    # 生成列名
     new_cols = [
         f"{diag_col}.icd10", 
         f"{diag_col}.score", 
@@ -386,24 +395,20 @@ def save_results(df, results, diag_col, output_dir, file_name):
         f"{diag_col}.method"
     ]
     
-    # 在诊断列右边插入新列
     diag_idx = df.columns.get_loc(diag_col)
     df.insert(diag_idx + 1, new_cols[0], icd_codes)
     df.insert(diag_idx + 2, new_cols[1], scores)
     df.insert(diag_idx + 3, new_cols[2], statuses)
     df.insert(diag_idx + 4, new_cols[3], methods)
     
-    # 保存主结果文件
     output_file = output_dir / f"{file_name}_icd10结果.csv"
     df.to_csv(output_file, index=False, encoding='utf-8-sig')
     
-    # 保存详细日志
     import json
     log_file = output_dir / "log" / "处理详情.json"
     with open(log_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
     
-    # 保存统计摘要
     summary_data = []
     for r in results:
         summary_data.append({
