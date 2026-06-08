@@ -25,10 +25,12 @@ logger = setup_logger()
 # 自定义CSS样式
 st.markdown("""
 <style>
-    /* 让按钮高度一致 */
+    /* 让按钮和输入框高度一致 */
     .stButton > button {
         height: 42px !important;
         margin-top: 0px !important;
+        padding-top: 0px !important;
+        padding-bottom: 0px !important;
     }
     
     /* 验证状态框样式 */
@@ -39,6 +41,7 @@ st.markdown("""
         font-size: 14px;
         height: 42px;
         line-height: 26px;
+        margin-top: 0px;
     }
     .status-verified {
         background-color: #d4edda;
@@ -51,15 +54,21 @@ st.markdown("""
         border: 1px solid #d6d8db;
     }
     
-    /* 让文件上传区域高度填满 */
-    [data-testid="stFileUploadDropzone"] {
-        height: 100% !important;
-        min-height: 120px !important;
+    /* 让文件上传组件高度对齐 */
+    .stFileUploader {
+        height: 42px !important;
     }
-    
-    /* 密钥验证消息全宽显示 */
-    .key-verify-message {
-        margin-top: 8px;
+    .stFileUploader > div {
+        height: 42px !important;
+    }
+    .stFileUploader > div > div {
+        height: 42px !important;
+    }
+    .stFileUploader button {
+        height: 42px !important;
+        margin-top: 0px !important;
+        padding-top: 0px !important;
+        padding-bottom: 0px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -83,6 +92,7 @@ def clear_data():
     st.session_state.file_name = None
     st.session_state.processing_done = False
     st.session_state.data_source = None
+    st.session_state.api_message = None
     if 'uploader_key' in st.session_state:
         st.session_state.uploader_key += 1
     else:
@@ -107,15 +117,12 @@ def main():
         st.session_state.uploader_key = 0
     if 'data_source' not in st.session_state:
         st.session_state.data_source = None
-    if 'verify_message' not in st.session_state:
-        st.session_state.verify_message = None
-    if 'verify_success' not in st.session_state:
-        st.session_state.verify_success = None
+    if 'api_message' not in st.session_state:
+        st.session_state.api_message = None
     
     # ========== 第一部分：API密钥配置 ==========
     st.subheader("🔑 API密钥配置")
     
-    # 第一行：输入框、验证按钮、状态框
     col_key1, col_key2, col_key3 = st.columns([3, 1, 1])
     
     with col_key1:
@@ -130,15 +137,17 @@ def main():
     with col_key2:
         if st.button("🔍 验证密钥", use_container_width=True):
             if not api_key:
-                st.session_state.verify_success = False
-                st.session_state.verify_message = "⚠️ 请先输入API密钥"
+                st.session_state.api_message = ("warning", "⚠️ 请先输入API密钥")
                 st.session_state.api_verified = False
             else:
                 with st.spinner("正在验证API密钥..."):
                     success, message = verify_api_key(api_key)
-                    st.session_state.verify_success = success
-                    st.session_state.verify_message = message
-                    st.session_state.api_verified = success
+                    if success:
+                        st.session_state.api_verified = True
+                        st.session_state.api_message = ("success", f"✅ {message}")
+                    else:
+                        st.session_state.api_verified = False
+                        st.session_state.api_message = ("error", f"❌ {message}")
             st.rerun()
     
     with col_key3:
@@ -147,22 +156,25 @@ def main():
         else:
             st.markdown('<div class="status-box status-unverified">⭕ 未验证</div>', unsafe_allow_html=True)
     
-    # 第二行：全宽显示验证消息
-    if st.session_state.verify_message is not None:
-        if st.session_state.verify_success:
-            st.success(f"✅ {st.session_state.verify_message}")
-        else:
-            st.error(f"❌ {st.session_state.verify_message}")
+    # 验证消息提示 - 全宽显示
+    if st.session_state.api_message:
+        msg_type, msg_text = st.session_state.api_message
+        if msg_type == "success":
+            st.success(msg_text)
+        elif msg_type == "error":
+            st.error(msg_text)
+        elif msg_type == "warning":
+            st.warning(msg_text)
     
     st.markdown("---")
     
     # ========== 第二部分：数据上传 ==========
     st.subheader("📁 数据上传")
     
-    # 左2/3：上传框，右1/3：两个按钮上下排列
-    col_left, col_right = st.columns([2, 1])
+    # 三个元素横向排列，高度对齐，占比 0.5 : 0.25 : 0.25
+    col_upload, col_sample, col_clear = st.columns([0.5, 0.25, 0.25])
     
-    with col_left:
+    with col_upload:
         uploaded_file = st.file_uploader(
             "上传CSV文件", 
             type=['csv'],
@@ -171,8 +183,7 @@ def main():
             key=f"file_uploader_{st.session_state.uploader_key}"
         )
     
-    with col_right:
-        st.markdown("<br>", unsafe_allow_html=True)  # 顶部留一点间距
+    with col_sample:
         if st.button("📋 加载示例数据", use_container_width=True):
             sample_path = Path("data/sample/示例诊断数据.csv")
             if sample_path.exists():
@@ -193,7 +204,8 @@ def main():
                     st.error(f"❌ 示例数据加载失败: {str(e)}")
             else:
                 st.warning("⚠️ 示例数据文件不存在")
-        
+    
+    with col_clear:
         if st.button("🗑️ 清除数据", use_container_width=True):
             clear_data()
             st.rerun()
@@ -261,13 +273,12 @@ def main():
             elif not st.session_state.api_verified:
                 with st.spinner("正在验证API密钥..."):
                     success, message = verify_api_key(api_key)
-                    st.session_state.verify_success = success
-                    st.session_state.verify_message = message
                     if success:
                         st.session_state.api_verified = True
+                        st.session_state.api_message = ("success", f"✅ {message}")
                     else:
-                        st.error(f"❌ API密钥验证失败: {message}")
-                        st.stop()
+                        st.session_state.api_message = ("error", f"❌ {message}")
+                    st.rerun()
             
             if st.session_state.api_verified:
                 process_data(current_df, current_file_name, diag_col, api_key, 
