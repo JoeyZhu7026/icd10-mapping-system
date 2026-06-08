@@ -3,8 +3,6 @@
 > **复旦大学"未来智造（AI Agent）工程师"训练营参赛项目**  
 > AI 智能体赋能医疗诊断标准化，让口语化诊断秒变标准 ICD-10 编码
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://icd10-mapping-system-pe8ksc4dp9rvb72zu3rzwf.streamlit.app/)
-
 ---
 
 ## 📖 项目简介
