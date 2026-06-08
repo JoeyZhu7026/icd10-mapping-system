@@ -53,23 +53,6 @@ st.markdown("""
         color: #383d41;
         border: 1px solid #d6d8db;
     }
-    
-    /* 让文件上传组件高度对齐 */
-    .stFileUploader {
-        height: 42px !important;
-    }
-    .stFileUploader > div {
-        height: 42px !important;
-    }
-    .stFileUploader > div > div {
-        height: 42px !important;
-    }
-    .stFileUploader button {
-        height: 42px !important;
-        margin-top: 0px !important;
-        padding-top: 0px !important;
-        padding-bottom: 0px !important;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -92,7 +75,6 @@ def clear_data():
     st.session_state.file_name = None
     st.session_state.processing_done = False
     st.session_state.data_source = None
-    st.session_state.api_message = None
     if 'uploader_key' in st.session_state:
         st.session_state.uploader_key += 1
     else:
@@ -117,11 +99,20 @@ def main():
         st.session_state.uploader_key = 0
     if 'data_source' not in st.session_state:
         st.session_state.data_source = None
-    if 'api_message' not in st.session_state:
-        st.session_state.api_message = None
+    if 'verify_message' not in st.session_state:
+        st.session_state.verify_message = None
+    if 'verify_success' not in st.session_state:
+        st.session_state.verify_success = None
     
     # ========== 第一部分：API密钥配置 ==========
     st.subheader("🔑 API密钥配置")
+    
+    # 显示验证结果消息（全宽度）
+    if st.session_state.verify_message is not None:
+        if st.session_state.verify_success:
+            st.success(st.session_state.verify_message)
+        else:
+            st.error(st.session_state.verify_message)
     
     col_key1, col_key2, col_key3 = st.columns([3, 1, 1])
     
@@ -137,17 +128,14 @@ def main():
     with col_key2:
         if st.button("🔍 验证密钥", use_container_width=True):
             if not api_key:
-                st.session_state.api_message = ("warning", "⚠️ 请先输入API密钥")
-                st.session_state.api_verified = False
+                st.session_state.verify_message = "⚠️ 请先输入API密钥"
+                st.session_state.verify_success = False
             else:
                 with st.spinner("正在验证API密钥..."):
                     success, message = verify_api_key(api_key)
-                    if success:
-                        st.session_state.api_verified = True
-                        st.session_state.api_message = ("success", f"✅ {message}")
-                    else:
-                        st.session_state.api_verified = False
-                        st.session_state.api_message = ("error", f"❌ {message}")
+                    st.session_state.verify_message = f"{'✅' if success else '❌'} {message}"
+                    st.session_state.verify_success = success
+                    st.session_state.api_verified = success
             st.rerun()
     
     with col_key3:
@@ -156,22 +144,12 @@ def main():
         else:
             st.markdown('<div class="status-box status-unverified">⭕ 未验证</div>', unsafe_allow_html=True)
     
-    # 验证消息提示 - 全宽显示
-    if st.session_state.api_message:
-        msg_type, msg_text = st.session_state.api_message
-        if msg_type == "success":
-            st.success(msg_text)
-        elif msg_type == "error":
-            st.error(msg_text)
-        elif msg_type == "warning":
-            st.warning(msg_text)
-    
     st.markdown("---")
     
     # ========== 第二部分：数据上传 ==========
     st.subheader("📁 数据上传")
     
-    # 三个元素横向排列，高度对齐，占比 0.5 : 0.25 : 0.25
+    # 横向排列：上传框占0.5，加载示例占0.25，清除数据占0.25
     col_upload, col_sample, col_clear = st.columns([0.5, 0.25, 0.25])
     
     with col_upload:
@@ -273,12 +251,11 @@ def main():
             elif not st.session_state.api_verified:
                 with st.spinner("正在验证API密钥..."):
                     success, message = verify_api_key(api_key)
-                    if success:
-                        st.session_state.api_verified = True
-                        st.session_state.api_message = ("success", f"✅ {message}")
-                    else:
-                        st.session_state.api_message = ("error", f"❌ {message}")
-                    st.rerun()
+                    st.session_state.verify_message = f"{'✅' if success else '❌'} {message}"
+                    st.session_state.verify_success = success
+                    st.session_state.api_verified = success
+                    if not success:
+                        st.rerun()
             
             if st.session_state.api_verified:
                 process_data(current_df, current_file_name, diag_col, api_key, 
