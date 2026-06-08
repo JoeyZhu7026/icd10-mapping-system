@@ -132,4 +132,16 @@ def get_file_info(file_path: str) -> Dict[str, Any]:
 def ensure_directory(path: str) -> str:
     """确保目录存在"""
     dir_path = Path(path)
-    dir_path.mk
+    dir_path.mkdir(parents=True, exist_ok=True)
+    return str(dir_path)
+
+def safe_filename(filename: str) -> str:
+    """生成安全的文件名"""
+    # 移除或替换不安全的字符
+    safe = re.sub(r'[<>:"/\\|?*]', '_', filename)
+    # 移除前后空格和点
+    safe = safe.strip('. ')
+    # 如果为空，使用默认名称
+    if not safe:
+        safe = 'untitled'
+    return safe
