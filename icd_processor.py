@@ -28,7 +28,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = setup_logger('processor')
 
 class ICDProcessor:
-    """ICD编码处理器"""
+    """ICD编码处理器 - 支持全疾病ICD-10编码映射"""
     
     def __init__(self, api_key: str, confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD, 
                  top_k: int = DEFAULT_TOP_K):
@@ -67,6 +67,10 @@ class ICDProcessor:
             # 加载数据
             self.icd_df = pd.read_csv(path)
             logger.info(f"ICD知识库加载完成，共 {len(self.icd_df)} 条记录")
+            
+            # 检查数据是否包含全疾病编码
+            unique_codes = self.icd_df['三位码'].str[0].unique()
+            logger.info(f"知识库覆盖的ICD编码首字母: {sorted(unique_codes)}")
             
             # 构建检索文本
             self.icd_df['检索文本'] = self.icd_df.apply(
@@ -163,15 +167,25 @@ class ICDProcessor:
                 logger.warning(f"[{index}] Step1失败: {result['处理状态']}")
                 return result
             
-            # 检查是否为非肿瘤诊断
+            # ========== 修改点：移除肿瘤限制，仅处理完全无法识别的情况 ==========
             extracted_term = step1_result.get('提取的术语', '')
             extracted_code = step1_result.get('提取的编码', '')
             
-            if extracted_term == "非肿瘤诊断" or (not extracted_code and not extracted_term):
-                result['处理状态'] = '非肿瘤诊断或无法识别'
+            # 完全无法识别时终止（没有提取到任何有效信息）
+            if not extracted_code and not extracted_term:
+                result['处理状态'] = '无法识别'
                 result['处理时间'] = time.time() - process_start_time
-                logger.info(f"[{index}] 非肿瘤诊断，跳过后续步骤")
+                logger.info(f"[{index}] 无法识别诊断，跳过后续步骤")
                 return result
+            
+            # LLM 明确返回无法识别的标记
+            if extracted_term in ["无法识别", "非疾病诊断", "未知诊断"]:
+                result['处理状态'] = extracted_term
+                result['处理时间'] = time.time() - process_start_time
+                logger.info(f"[{index}] {extracted_term}，跳过后续步骤")
+                return result
+            
+            # ========== 修改结束 ==========
             
             # 尝试直接编码
             if extracted_code and extracted_code in self.code_to_name:
@@ -182,8 +196,12 @@ class ICDProcessor:
                 result['Step2'] = {'状态': '跳过（直接编码匹配）'}
                 result['Step3'] = {'状态': '跳过（直接编码匹配）'}
                 result['处理时间'] = time.time() - process_start_time
-                logger.info(f"[{index}] ✅ 直接编码成功: {extracted_code}")
+                logger.info(f"[{index}] ✅ 直接编码成功: {extracted_code} - {self.code_to_name.get(extracted_code, '')}")
                 return result
+            
+            # LLM 提取到了术语但没有编码，进入检索流程
+            if extracted_term and not extracted_code:
+                logger.info(f"[{index}] LLM提取术语: '{extracted_term}'，未提取到编码，进入检索流程")
             
             # Step 2: 向量检索
             step2_start = time.time()
@@ -209,7 +227,7 @@ class ICDProcessor:
                 result['最终置信度'] = score
                 result['匹配方式'] = '检索匹配'
                 result['处理状态'] = '成功'
-                logger.info(f"[{index}] ✅ 检索匹配成功: {best_match['ICD编码']} (置信度: {score:.3f})")
+                logger.info(f"[{index}] ✅ 检索匹配成功: {best_match['ICD编码']} - {best_match['标准名称']} (置信度: {score:.3f})")
             elif best_match:
                 result['最终ICD编码'] = best_match['ICD编码']
                 result['最终置信度'] = score
@@ -233,7 +251,7 @@ class ICDProcessor:
         return result
     
     def _step1_normalize(self, diagnosis: str, index: int) -> Dict:
-        """Step 1: LLM提取标准术语和编码"""
+        """Step 1: LLM提取标准术语和编码 - 支持全疾病ICD-10编码"""
         step1_result = {
             '原始诊断': diagnosis,
             '原始输出': '',
@@ -247,21 +265,33 @@ class ICDProcessor:
             '错误信息': ''
         }
         
-        # 构建提示词
-        prompt = f"""你是一个医学文本处理助手。请将以下口语化诊断描述转换为ICD-10三位码（如C50）和标准疾病术语。
+        # ========== 修改点：全疾病 Prompt ==========
+        prompt = f"""你是一个医学文本处理助手。请将以下口语化诊断描述转换为ICD-10三位码（如C50、I10、E11、J45等）和标准疾病术语。
+
 要求：
-1. 如果诊断是肿瘤相关，请输出对应的ICD-10三位码和标准名称，格式严格为：ICD码|标准术语
-   例如输入"乳房恶性肿瘤"，应输出"C50|乳房恶性肿瘤"
-   例如输入"肺癌"，应输出"C34|支气管和肺恶性肿瘤"
-2. 如果诊断含"术后""转移""待查""结节""占位"等，也要输出原发肿瘤的ICD码（若明确），对于无法确定性质的，可输出"无|非肿瘤诊断"
-3. 如果诊断无法判断或不是肿瘤，输出"无|非肿瘤诊断"
+1. 请输出诊断对应的ICD-10三位码和标准名称，格式严格为：ICD码|标准术语
+   以下是各章节的示例：
+   - 肿瘤：输入"乳房恶性肿瘤"，输出"C50|乳房恶性肿瘤"
+   - 循环系统：输入"高血压"，输出"I10|原发性高血压"
+   - 内分泌：输入"2型糖尿病"，输出"E11|2型糖尿病"
+   - 呼吸系统：输入"支气管哮喘"，输出"J45|哮喘"
+   - 消化系统：输入"胃溃疡"，输出"K25|胃溃疡"
+   - 传染病：输入"肺结核"，输出"A15|呼吸道结核"
+   
+2. 如果诊断含"术后""转移""待查""结节"等修饰词：
+   - 如能确定原发疾病，请输出原发疾病的ICD码
+   - 如"肺癌术后"应输出"C34|支气管和肺恶性肿瘤"
+   
+3. 如果诊断完全无法判断或无对应ICD编码，输出"无|无法识别"
+
 4. 只输出一行，不要有任何解释
 
 输入：{diagnosis}
 输出："""
+        # ========== 修改结束 ==========
         
         messages = [
-            {"role": "system", "content": "你是专业的医学诊断编码助手，严格遵守输出格式。"},
+            {"role": "system", "content": "你是专业的医学诊断编码助手，擅长将口语化诊断映射至ICD-10全疾病编码（A00-Z99），严格遵守输出格式。"},
             {"role": "user", "content": prompt}
         ]
         
@@ -284,30 +314,47 @@ class ICDProcessor:
             # 更新当前使用的模型
             self.current_model = result['model']
             
+            # ========== 修改点：解析逻辑保持通用性 ==========
             # 解析输出
             if '|' in content:
                 parts = content.split('|', 1)
                 code_part = parts[0].strip()
                 term_part = parts[1].strip() if len(parts) > 1 else ''
-                match = re.search(r'([A-Z]\d{2})', code_part)
-                if match and match.group(1) != '无':
-                    step1_result['提取的编码'] = match.group(1)
-                    step1_result['提取的术语'] = term_part if term_part else code_part
-                    step1_result['是否直接编码'] = True
+                
+                # 匹配ICD-10编码格式（字母+2位数字，可能带小数点后数字）
+                match = re.search(r'([A-Z]\d{2}(?:\.\d+)?)', code_part)
+                if match:
+                    code = match.group(1)
+                    # 标准化为三位码格式（去掉小数点后内容）
+                    base_code = code.split('.')[0] if '.' in code else code
+                    if base_code != '无':
+                        step1_result['提取的编码'] = base_code
+                        step1_result['提取的术语'] = term_part if term_part else code_part
+                        step1_result['是否直接编码'] = True
+                    else:
+                        step1_result['提取的术语'] = term_part if term_part else code_part
                 else:
-                    step1_result['提取的编码'] = ''
-                    step1_result['提取的术语'] = term_part if term_part else code_part
+                    if code_part != '无':
+                        step1_result['提取的术语'] = term_part if term_part else code_part
+                    else:
+                        step1_result['提取的术语'] = term_part if term_part else '无法识别'
             else:
-                match = re.search(r'([A-Z]\d{2})', content)
-                if match and match.group(1) != '无':
-                    step1_result['提取的编码'] = match.group(1)
-                    step1_result['提取的术语'] = content
-                    step1_result['是否直接编码'] = True
+                # 没有分隔符，尝试直接提取编码
+                match = re.search(r'([A-Z]\d{2}(?:\.\d+)?)', content)
+                if match:
+                    code = match.group(1)
+                    base_code = code.split('.')[0] if '.' in code else code
+                    if base_code != '无':
+                        step1_result['提取的编码'] = base_code
+                        step1_result['提取的术语'] = content
+                        step1_result['是否直接编码'] = True
+                    else:
+                        step1_result['提取的术语'] = content
                 else:
-                    step1_result['提取的编码'] = ''
                     step1_result['提取的术语'] = content
-                    if content == "非肿瘤诊断":
-                        step1_result['提取的术语'] = "非肿瘤诊断"
+                    if content in ["无法识别", "非疾病诊断", "未知诊断"]:
+                        step1_result['提取的术语'] = content
+            # ========== 修改结束 ==========
             
             logger.debug(f"[{index}] Step1输出: {content[:100]}")
         else:
@@ -366,7 +413,7 @@ class ICDProcessor:
             step2_result['状态'] = '成功'
             
             if candidates:
-                logger.debug(f"检索成功: {len(candidates)}个候选, 最佳: {candidates[0]['ICD编码']} (相似度: {candidates[0]['相似度']:.4f})")
+                logger.debug(f"检索成功: {len(candidates)}个候选, 最佳: {candidates[0]['ICD编码']} - {candidates[0]['标准名称']} (相似度: {candidates[0]['相似度']:.4f})")
             
         except Exception as e:
             step2_result['错误信息'] = str(e)
@@ -426,7 +473,7 @@ class ICDProcessor:
             step3_result['最终分数'] = best_score
             step3_result['状态'] = '成功'
             
-            logger.debug(f"精排成功: {best_candidate['ICD编码']} (分数: {best_score:.4f})")
+            logger.debug(f"精排成功: {best_candidate['ICD编码']} - {best_candidate['标准名称']} (分数: {best_score:.4f})")
             
             return step3_result, best_candidate, best_score
             
