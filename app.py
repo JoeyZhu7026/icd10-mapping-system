@@ -80,6 +80,33 @@ def clear_data():
     else:
         st.session_state.uploader_key = 1
 
+def get_icd_knowledge_base_download_button():
+    """生成下载ICD知识库文件的按钮和逻辑"""
+    icd_lib_path = Path("data/icd10_data/ICD-10医保1.0版.总表.三位码.别名.csv")
+    
+    if not icd_lib_path.exists():
+        st.warning("⚠️ 知识库文件不存在")
+        return
+    
+    # 读取文件内容
+    with open(icd_lib_path, 'rb') as f:
+        file_data = f.read()
+    
+    # 获取文件信息
+    file_size_mb = len(file_data) / (1024 * 1024)
+    file_name = icd_lib_path.name
+    
+    # 创建下载按钮
+    st.download_button(
+        label=f"📥 下载知识库 ({file_size_mb:.1f}MB)",
+        data=file_data,
+        file_name=file_name,
+        mime="text/csv",
+        use_container_width=True,
+        help="下载ICD-10全疾病编码知识库文件（CSV格式）",
+        key="download_icd_kb"
+    )
+
 def main():
     st.title("🏥 ICD-10 诊断编码映射系统")
     st.markdown("---")
@@ -212,8 +239,8 @@ def main():
     if current_df is not None:
         st.markdown("---")
         st.subheader("⚙️ 处理配置")
-        
-        col_config1, col_config2, col_config3 = st.columns(3)
+
+        col_config1, col_config2, col_config3, col_config4 = st.columns([1, 1, 1, 0.6])
         
         with col_config1:
             diag_col = st.selectbox(
@@ -238,6 +265,11 @@ def main():
                 value=10,
                 help="向量检索时返回的候选数量"
             )
+        
+        with col_config4:
+            # 添加一些上边距使按钮与上方对齐
+            st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+            get_icd_knowledge_base_download_button()
         
         with st.expander("📊 数据预览（点击展开）"):
             st.dataframe(current_df.head(10), use_container_width=True)
