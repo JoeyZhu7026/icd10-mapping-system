@@ -167,7 +167,6 @@ class ICDProcessor:
                 logger.warning(f"[{index}] Step1失败: {result['处理状态']}")
                 return result
             
-            # ========== 修改点：移除肿瘤限制，仅处理完全无法识别的情况 ==========
             extracted_term = step1_result.get('提取的术语', '')
             extracted_code = step1_result.get('提取的编码', '')
             
@@ -185,7 +184,6 @@ class ICDProcessor:
                 logger.info(f"[{index}] {extracted_term}，跳过后续步骤")
                 return result
             
-            # ========== 修改结束 ==========
             
             # 尝试直接编码
             if extracted_code and extracted_code in self.code_to_name:
@@ -265,7 +263,6 @@ class ICDProcessor:
             '错误信息': ''
         }
         
-        # ========== 修改点：全疾病 Prompt ==========
         prompt = f"""你是一个医学文本处理助手。请将以下口语化诊断描述转换为ICD-10三位码（如C50、I10、E11、J45等）和标准疾病术语。
 
 要求：
@@ -288,7 +285,6 @@ class ICDProcessor:
 
 输入：{diagnosis}
 输出："""
-        # ========== 修改结束 ==========
         
         messages = [
             {"role": "system", "content": "你是专业的医学诊断编码助手，擅长将口语化诊断映射至ICD-10全疾病编码（A00-Z99），严格遵守输出格式。"},
@@ -314,7 +310,6 @@ class ICDProcessor:
             # 更新当前使用的模型
             self.current_model = result['model']
             
-            # ========== 修改点：解析逻辑保持通用性 ==========
             # 解析输出
             if '|' in content:
                 parts = content.split('|', 1)
@@ -354,7 +349,6 @@ class ICDProcessor:
                     step1_result['提取的术语'] = content
                     if content in ["无法识别", "非疾病诊断", "未知诊断"]:
                         step1_result['提取的术语'] = content
-            # ========== 修改结束 ==========
             
             logger.debug(f"[{index}] Step1输出: {content[:100]}")
         else:
