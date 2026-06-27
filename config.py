@@ -33,12 +33,10 @@ SECONDARY_MODELS = [
 
 ALL_MODELS = PRIMARY_MODELS + SECONDARY_MODELS
 
-# ========== 修改点：全疾病编码可能需要更多候选和更长超时 ==========
 # 检索参数
-DEFAULT_TOP_K = 15  # 从10增加到15，确保覆盖更多疾病类别
+DEFAULT_TOP_K = 15 
 DEFAULT_CONFIDENCE_THRESHOLD = 0.5
-REQUEST_TIMEOUT = 15  # 从15秒增加到20秒，给模型更多思考时间
-# ========== 修改结束 ==========
+REQUEST_TIMEOUT = 15  
 
 # ICD知识库路径
 ICD_LIB_PATH = DATA_DIR / "icd10_data" / "ICD-10医保1.0版.总表.三位码.别名.csv"
